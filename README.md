@@ -1,4 +1,4 @@
-# SamuraiLoan Protocol on Solana
+# CountryLoan Protocol on Solana
 
 A decentralized lending and borrowing protocol built on Solana using Anchor. Users can deposit collateral and borrow supported tokens against over-collateralized positions with specific token-to-token pairs.
 
