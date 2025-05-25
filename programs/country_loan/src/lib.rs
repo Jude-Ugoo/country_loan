@@ -6,7 +6,9 @@ pub use state::*;
 pub mod instructions;
 pub use instructions::*;
 
-declare_id!("4xjyVNqjK5CwSJJbMDHAdYnHMrEcc8wYAZ8QGz2Xx56P");
+pub mod errors;
+
+declare_id!("rtPR4JNRCAu4fo8rrMmggdsouxfNwUnmnhCtf7n6XFB");
 
 #[program]
 pub mod country_loan {
@@ -28,6 +30,15 @@ pub mod country_loan {
 
     pub fn init_user(ctx: Context<InitUser>) -> Result<()> {
         init_user::init_user(ctx)
+    }
+
+    pub fn register_token(
+        ctx: Context<RegisterToken>,
+        vault_address: Pubkey,
+        token_mint: Pubkey,
+        price_feed: Pubkey,
+    ) -> Result<()> {
+        register_token::register_token(ctx, vault_address, token_mint, price_feed)
     }
 }
 

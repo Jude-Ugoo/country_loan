@@ -1,17 +1,17 @@
 [toolchain]
 
 [features]
-resolution = true
+seeds = false
 skip-lint = false
 
 [programs.localnet]
-country_loan = "4xjyVNqjK5CwSJJbMDHAdYnHMrEcc8wYAZ8QGz2Xx56P"
+country_loan = "FUyHcumJQnFJPiiMXRvoQeCLarHhBMHP9St1XDp5VVuJ"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Localnet"
+cluster = "https://api.devnet.solana.com"
 wallet = "~/.config/solana/id.json"
 
 [scripts]

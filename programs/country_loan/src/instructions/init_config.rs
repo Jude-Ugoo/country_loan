@@ -5,7 +5,7 @@ use crate::ProtocolConfig;
 #[derive(Accounts)]
 pub struct InitializeConfig<'info> {
     #[account(
-        init,
+        init_if_needed,
         payer = admin,
         space = 8 + std::mem::size_of::<ProtocolConfig>(),
         seeds = [b"config"],

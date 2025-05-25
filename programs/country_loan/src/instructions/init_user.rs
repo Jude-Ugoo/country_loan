@@ -4,7 +4,7 @@ use crate::UserAccount;
 #[derive(Accounts)]
 pub struct InitUser<'info> {
     #[account(
-        init,
+        init_if_needed,
         payer = user,
         space = 8 + std::mem::size_of::<UserAccount>(),
         seeds = [b"user", user.key().as_ref()], // This guarantees uniqueness per wallet and allows fetching by public key.
