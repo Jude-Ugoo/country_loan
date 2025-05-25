@@ -8,7 +8,7 @@ pub use instructions::*;
 
 pub mod errors;
 
-declare_id!("rtPR4JNRCAu4fo8rrMmggdsouxfNwUnmnhCtf7n6XFB");
+declare_id!("rtqy7o2TA9AHytgZ7932gG1E5vhp3rSGkojnojdnNnP");
 
 #[program]
 pub mod country_loan {

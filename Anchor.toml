@@ -5,13 +5,13 @@ seeds = false
 skip-lint = false
 
 [programs.localnet]
-country_loan = "FUyHcumJQnFJPiiMXRvoQeCLarHhBMHP9St1XDp5VVuJ"
+country_loan = "rtqy7o2TA9AHytgZ7932gG1E5vhp3rSGkojnojdnNnP"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "https://api.devnet.solana.com"
+cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
