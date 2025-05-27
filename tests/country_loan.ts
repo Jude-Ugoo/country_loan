@@ -1,7 +1,7 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { CountryLoan } from "../target/types/country_loan";
-import { Keypair, PublicKey } from "@solana/web3.js";
+import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { assert, expect } from "chai";
 import * as spl from "@solana/spl-token";
 
@@ -11,21 +11,76 @@ describe("country_loan", () => {
   anchor.setProvider(provider);
 
   const program = anchor.workspace.CountryLoan as Program<CountryLoan>;
+  const connecton = provider.connection;
 
   // Generate keys for admin, token mint, vault, and price feed
-  const user = provider.wallet.publicKey;
+  const admin = provider.wallet;
+  const user = Keypair.generate();
   const tokenMint = Keypair.generate().publicKey;
-  const vaultAddress = Keypair.generate().publicKey;
-  const priceFeed = Keypair.generate().publicKey; // Simulated Pyth price feed PDA
+  //   const vaultAddress = Keypair.generate().publicKey;
+  const priceFeed = Keypair.generate().publicKey;
 
+  const depositAmount = 100_000_000;
+
+  let wethMint: PublicKey;
+  let userTokenAccount: PublicKey;
+  let vaultTokenAccount: PublicKey;
+  let configPda: PublicKey;
+  let vaultPda: PublicKey;
+  let userAccountPda: PublicKey;
+
+  before(async () => {
+    // Airdrop SOL to user for account creation
+    await connecton.requestAirdrop(user.publicKey, 2_000_000_000);
+    await connecton.requestAirdrop(admin.publicKey, 2_000_000_000);
+    let balance = await connecton.getBalance(user.publicKey);
+    while (balance < 2_000_000_000) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      balance = await connecton.getBalance(user.publicKey);
+    }
+
+    // Create WETH mint
+    wethMint = await spl.createMint(
+      connecton,
+      admin.payer,
+      admin.publicKey,
+      null,
+      9
+    );
+
+    // Create user token account
+    userTokenAccount = await spl.createAccount(
+      connecton,
+      user,
+      wethMint,
+      user.publicKey
+    );
+
+    vaultTokenAccount = await spl.createAccount(
+      connecton,
+      admin.payer,
+      wethMint,
+      admin.publicKey
+    );
+
+    // Mint WETH to user
+    await spl.mintTo(
+      connecton,
+      admin.payer,
+      wethMint,
+      userTokenAccount,
+      admin.payer,
+      depositAmount
+    );
+  });
 
   it("Initializes the protocol config", async () => {
-    const [configPda] = PublicKey.findProgramAddressSync(
+    // Initialize ProtocolConfig first (required for admin check)
+    [configPda] = PublicKey.findProgramAddressSync(
       [Buffer.from("config")],
       program.programId
     );
 
-    // Initialize ProtocolConfig first (required for admin check)
     const tx = await program.methods
       .initializeConfig(
         new anchor.BN(300), // Intrest_rate_3.00%
@@ -34,7 +89,7 @@ describe("country_loan", () => {
       )
       .accounts({
         // protocolConfig: configPda,
-        admin: provider.wallet.publicKey,
+        admin: admin.publicKey,
         // systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
@@ -49,49 +104,146 @@ describe("country_loan", () => {
     );
   });
 
-  it("Initializes the user account PDA", async () => {
-    // Generate the user account PDA
-    const [userAccountPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("user"), user.toBuffer()],
+  it("Initializes the user account PDA for Admin", async () => {
+    const [adminAccountPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("user"), admin.publicKey.toBuffer()],
       program.programId
     );
 
     // Call initialize user account
-    const tx = await program.methods
-      .initUser()
-      .accounts({
-        // userAccount: userAccountPda,
-        user,
-        // systemProgram: anchor.web3.SystemProgram.programId,
-      })
-      .rpc();
+    try {
+      await program.methods
+        .initUser()
+        .accounts({
+          userAccount: adminAccountPda,
+          user: admin.publicKey,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
+      const adminAccountBefore = await program.account.userAccount.fetch(
+        adminAccountPda
+      );
+      console.log("Admin account initialized successfully");
+      console.log("Admin account owner:", adminAccountBefore.owner.toBase58());
+      console.log(
+        "Initial token balances:",
+        adminAccountBefore.tokenBalances.map((b) => b.toNumber())
+      );
+      console.log("Has active loan:", adminAccountBefore.hasActiveLoan);
+    } catch (error) {
+      console.error("InitUser failed:", error);
+      throw error;
+    }
 
     // Fetch the user account
-    const account = await program.account.userAccount.fetch(userAccountPda);
+    const adminAccount = await program.account.userAccount.fetch(
+      adminAccountPda
+    );
 
-    expect(account.owner.toBase58()).to.equal(user.toBase58());
-    expect(account.totalCollateralUsd.toNumber()).to.equal(0);
-    expect(account.totalDebtUsd.toNumber()).to.equal(0);
+    expect(adminAccount.owner.toBase58()).to.equal(admin.publicKey.toBase58());
+    adminAccount.tokenBalances.forEach((balance, index) => {
+      expect(balance.toNumber()).to.equal(
+        0,
+        `tokenBalances[${index}] should be 0`
+      );
+    });
+    expect(adminAccount.hasActiveLoan).to.equal(false);
   });
 
   it("Registers WETH token metadata", async () => {
     // Generate PDA for collateral vault
-    const [vaultPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("vault"), user.toBuffer(), tokenMint.toBuffer()],
+    [vaultPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), admin.publicKey.toBuffer(), wethMint.toBuffer()],
       program.programId
     );
 
-    // Call register_token
+    try {
+      await program.methods
+        .registerToken(vaultTokenAccount, tokenMint, priceFeed)
+        .accounts({
+          collateralVault: vaultPda,
+          protocolConfig: configPda,
+          admin: admin.publicKey,
+          vaultAddress: vaultTokenAccount,
+          tokenMint: wethMint,
+          priceFeed,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .rpc();
+    } catch (error) {
+      console.error("RegisterToken failed:", error);
+      throw error;
+    }
+
+    // Fetch the CollateralVault account
+    const collateralVault = await program.account.collateralVault.fetch(
+      vaultPda
+    );
+
+    // Compare the actual values with the input values
+    expect(collateralVault.tokenMint.toBase58()).to.equal(tokenMint.toBase58());
+    expect(collateralVault.vaultAddress.toBase58()).to.equal(
+      vaultTokenAccount.toBase58()
+    );
+    expect(collateralVault.priceFeed.toBase58()).to.equal(priceFeed.toBase58());
+  });
+
+  it("Deposits WETH to vault and updates UserAccount", async () => {
+    //========================== Initialize ProtocolConfig first (required for admin check) ======================
+
+    //===========================================================================================================
+
+    //==================================== Initialize user account PDA for `user` =================================
+    [userAccountPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("user"), user.publicKey.toBuffer()],
+      program.programId
+    );
+
+    // Call initialize user account
+    try {
+      await program.methods
+        .initUser()
+        .accounts({
+          userAccount: userAccountPda,
+          user: user.publicKey,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([user])
+        .rpc();
+
+      // Verify user account initialization
+      const userAccountBefore = await program.account.userAccount.fetch(
+        userAccountPda
+      );
+      console.log("\nUser account initialized successfully");
+      console.log("User account owner:", userAccountBefore.owner.toBase58());
+      console.log(
+        "Initial token balances:",
+        userAccountBefore.tokenBalances.map((b) => b.toNumber())
+      );
+      console.log("Has active loan:", userAccountBefore.hasActiveLoan);
+    } catch (error) {
+      console.error("InitUser failed:", error);
+      throw error;
+    }
+    //============================================================================================================
+
+    //======================================== Generate PDA for collateral vault ===================================
+    [vaultPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), admin.publicKey.toBuffer(), wethMint.toBuffer()],
+      program.programId
+    );
+
     await program.methods
-      .registerToken(vaultAddress, tokenMint, priceFeed)
+      .registerToken(vaultTokenAccount, tokenMint, priceFeed)
       .accounts({
-        // collateralVault: vaultPda,
-        // protocolConfig: configPda,
-        // admin: admin.publicKey,
-        vaultAddress,
-        tokenMint,
+        collateralVault: vaultPda,
+        protocolConfig: configPda,
+        admin: admin.publicKey,
+        vaultAddress: vaultTokenAccount,
+        tokenMint: wethMint,
         priceFeed,
-        // systemProgram: anchor.web3.SystemProgram.programId,
+        systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
 
@@ -100,80 +252,73 @@ describe("country_loan", () => {
       vaultPda
     );
 
-   // Compare the actual values with the input values
+    // Compare the actual values with the input values
     expect(collateralVault.tokenMint.toBase58()).to.equal(tokenMint.toBase58());
     expect(collateralVault.vaultAddress.toBase58()).to.equal(
-      vaultAddress.toBase58()
+      vaultTokenAccount.toBase58()
     );
     expect(collateralVault.priceFeed.toBase58()).to.equal(priceFeed.toBase58());
+    //=================================================================================================================
+
+    //================================================= Call Deposit ==================================================
+    const tokenIndex = 0; // WETH at index 0
+    const userAccountBefore = await program.account.userAccount.fetch(
+      userAccountPda
+    );
+
+    console.log("\nBefore deposit:");
+    console.log(
+      "User token account balance:",
+      (await connecton.getTokenAccountBalance(userTokenAccount)).value.uiAmount
+    );
+    console.log(
+      "Vault token account balance:",
+      (await connecton.getTokenAccountBalance(vaultTokenAccount)).value.uiAmount
+    );
+    console.log(
+      "User account token balances:",
+      userAccountBefore.tokenBalances.map((b) => b.toNumber())
+    );
+
+    await program.methods
+      .deposit(new anchor.BN(depositAmount), tokenIndex)
+      .accounts({
+        userAccount: userAccountPda,
+        collateralVault: vaultPda,
+        user: user.publicKey,
+        admin: admin.publicKey,
+        userTokenAccount: userTokenAccount,
+        vaultTokenAccount: vaultTokenAccount,
+        tokenMint: wethMint,
+        tokenProgram: spl.TOKEN_PROGRAM_ID,
+      })
+      .signers([user])
+      .rpc();
+
+    // Fetch accounts
+    const vaultBalance = (
+      await connecton.getTokenAccountBalance(vaultTokenAccount)
+    ).value.uiAmount;
+    const userAccount = await program.account.userAccount.fetch(userAccountPda);
+
+    console.log("\nAfter deposit:");
+    console.log(
+      "User token account balance:",
+      (await connecton.getTokenAccountBalance(userTokenAccount)).value.uiAmount
+    );
+    console.log("Vault token account balance:", vaultBalance);
+    console.log(
+      "User account token balances:",
+      userAccount.tokenBalances.map((b) => b.toNumber())
+    );
+    console.log("Deposit amount:", depositAmount);
+    console.log("Token index:", tokenIndex);
+
+    // Assertions
+    expect(vaultBalance).to.equal(depositAmount / 10 ** 9);
+    expect(userAccount.tokenBalances[tokenIndex].toNumber()).to.equal(
+      depositAmount
+    );
+    //========================================================================================================================
   });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  //   it("Initializes the vault WETH", async () => {
-  //     const [vaultPda] = PublicKey.findProgramAddressSync(
-  //       [Buffer.from("vault"), user.toBuffer(), wethMint.publicKey.toBuffer()],
-  //       program.programId
-  //     );
-
-  //     const tokenAccount = spl.getAssociatedTokenAddressSync(
-  //       wethMint.publicKey,
-  //       vaultPda,
-  //       true,
-  //       spl.TOKEN_PROGRAM_ID
-  //     );
-
-  //     const tx = await program.methods
-  //       .initVault()
-  //       .accounts({
-  //         payer: user,
-  //         vault: vaultPda,
-  //         tokenMint: wethMint.publicKey,
-  //         oracleAddress: fakeOracle.publicKey,
-  //         tokenAccount,
-  //         associatedTokenProgram: anchor.utils.token.ASSOCIATED_PROGRAM_ID,
-  //         tokenProgram: anchor.utils.token.TOKEN_PROGRAM_ID,
-  //         systemProgram: anchor.web3.SystemProgram.programId,
-  //         rent: anchor.web3.SYSVAR_RENT_PUBKEY,
-  //       })
-  //       .signers([])
-  //       .rpc();
-
-  //     const vault = await program.account.vault.fetch(vaultPda);
-
-  //     expect(vault.tokenMint.toBase58()).to.equal(wethMint.publicKey.toBase58());
-  //     expect(vault.tokenAccount.toBase58()).to.equal(tokenAccount.toBase58());
-  //     // expect(vault.bump).to.equal(0);
-  //   });
 });

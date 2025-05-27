@@ -40,6 +40,10 @@ pub mod country_loan {
     ) -> Result<()> {
         register_token::register_token(ctx, vault_address, token_mint, price_feed)
     }
+
+    pub fn deposit(ctx: Context<Deposit>, amount: u64, token_index: u8) -> Result<()> {
+        deposit::deposit(ctx, amount, token_index)
+    }
 }
 
 #[derive(Accounts)]

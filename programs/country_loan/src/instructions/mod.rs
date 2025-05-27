@@ -6,3 +6,6 @@ pub use init_user::*;
 
 pub mod register_token;
 pub use register_token::*;
+
+pub mod deposit;
+pub use deposit::*;
