@@ -10,4 +10,18 @@ pub enum ErrorCode {
     InvalidTokenOwner,
     #[msg("Vault address does not match collateral vault")]
     InvalidVaultAddress,
+    #[msg("Invalid amount")]
+    InvalidAmount,
+    #[msg("Invalid duration")]
+    InvalidDuration,
+    #[msg("Invalid token index")]
+    InvalidTokenIndex,
+    #[msg("Insufficient collateral")]
+    InsufficientCollateral,
+    #[msg("Arithmetic error")]
+    ArithmeticError,
+    #[msg("Unauthorized access")]
+    UnauthorizedAccess,
+    #[msg("Invalid or stale price feed")]
+    InvalidPrice,
 }

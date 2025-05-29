@@ -6,6 +6,9 @@ pub use state::*;
 pub mod instructions;
 pub use instructions::*;
 
+pub mod utils;
+pub use utils::*;
+
 pub mod errors;
 
 declare_id!("rtqy7o2TA9AHytgZ7932gG1E5vhp3rSGkojnojdnNnP");
@@ -44,6 +47,8 @@ pub mod country_loan {
     pub fn deposit(ctx: Context<Deposit>, amount: u64, token_index: u8) -> Result<()> {
         deposit::deposit(ctx, amount, token_index)
     }
+
+    // pub fn init_loan()
 }
 
 #[derive(Accounts)]

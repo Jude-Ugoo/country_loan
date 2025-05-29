@@ -9,3 +9,6 @@ pub use register_token::*;
 
 pub mod deposit;
 pub use deposit::*;
+
+pub mod init_loan;
+pub use init_loan::*;
