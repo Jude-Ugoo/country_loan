@@ -49,6 +49,10 @@ pub mod country_loan {
     }
 
     // pub fn init_loan()
+
+    pub fn fetch_price(ctx: Context<FetchPrice>) -> Result<u64> {
+        utils::pyth::fetch_price(ctx)
+    }
 }
 
 #[derive(Accounts)]

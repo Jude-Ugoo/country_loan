@@ -24,4 +24,6 @@ pub enum ErrorCode {
     UnauthorizedAccess,
     #[msg("Invalid or stale price feed")]
     InvalidPrice,
+    #[msg("The given account is owned by a different program than expected")]
+    AccountOwnedByWrongProgram,
 }

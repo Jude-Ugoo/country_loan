@@ -1,9 +1,21 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { CountryLoan } from "../target/types/country_loan";
-import { Connection, Keypair, PublicKey } from "@solana/web3.js";
+import { Connection, Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
 import { assert, expect } from "chai";
 import * as spl from "@solana/spl-token";
+
+// Constants for mocking PriceUpdateV2 account
+const PYTH_MAGIC = 0xd1ce; // Magic number for PriceUpdateV2
+const PYTH_VERSION = 2; // Version
+const PYTH_ATYPE = 0; // Account type
+const PYTH_PRICE = 200000; // $2000 in cents (WETH/USD, expo -2)
+const PYTH_EXPO = -2; // Exponent for price (cents)
+const PYTH_CONF = 1000; // Confidence interval
+const WETH_FEED_ID = Buffer.from(
+  "ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace",
+  "hex"
+); // WETH/USD feed ID
 
 describe("country_loan", () => {
   // Configure the client to use the local cluster.
@@ -320,5 +332,100 @@ describe("country_loan", () => {
       depositAmount
     );
     //========================================================================================================================
+  });
+
+  //========================================= FETCHES PRICE FROM PYTH FEED =======================================
+  it("Fetches price from mock Pyth feed", async () => {
+    // Generates a keypair for then mock price feed account
+    const priceFeed = Keypair.generate();
+
+    // Fetch the validator's clock to ensure the timestamp is fresh
+    const slot = await connecton.getSlot();
+    const slotTime = await connecton.getBlockTime(slot);
+    const currentTimestamp = slotTime || Math.floor(Date.now() / 1000);
+
+    // Mock Pyth price feed data
+    const priceFeedData = Buffer.alloc(256); // Allocate enough space for the price account
+    let offset = 0;
+
+    // Write PriceUpdateV2 account data (simplified)
+    priceFeedData.writeUInt8(0, offset); // writeable (false)
+    offset += 1;
+    priceFeedData.fill(0, offset, offset + 7); // _padding (7 bytes, all zeros)
+    offset += 7; // Padding to align to 8 bytes
+    priceFeedData.writeUInt32LE(PYTH_MAGIC, offset); // magic
+    offset += 4;
+    priceFeedData.writeUInt32LE(PYTH_VERSION, offset); // ver
+    offset += 4;
+    priceFeedData.writeUInt32LE(PYTH_ATYPE, offset); // atype
+    offset += 4;
+    priceFeedData.fill(0, offset, offset + 4); // _padding2 (4 bytes, all zeros)
+    offset += 4; // Padding
+
+    // Write PriceFeedMessage (price_message field)
+    priceFeedData.set(WETH_FEED_ID, offset); // feed_id (32 bytes)
+    offset += 32;
+    priceFeedData.writeBigInt64LE(BigInt(PYTH_PRICE), offset); // price (i64)
+    offset += 8;
+    priceFeedData.writeBigUInt64LE(BigInt(PYTH_CONF), offset); // conf (u64)
+    offset += 8;
+    priceFeedData.writeInt32LE(PYTH_EXPO, offset); // exponent (i32)
+    offset += 4;
+    priceFeedData.fill(0, offset, offset + 4); // _padding (4 bytes, all zeros)
+    offset += 4; // Padding
+    // const currentTimestamp = Math.floor(Date.now() / 1000);
+    priceFeedData.writeBigInt64LE(BigInt(currentTimestamp), offset); // publish_time (i64)
+    offset += 8;
+    priceFeedData.writeBigInt64LE(BigInt(currentTimestamp - 10), offset); // prev_publish_time (i64)
+    offset += 8;
+
+    // Additional fields that might be expected by PriceUpdateV2
+    const dummySignature = Buffer.alloc(64, 0xaa); // 64 bytes for a dummy signature
+    priceFeedData.set(dummySignature, offset); // signature (64 bytes)
+    offset += 64;
+
+    const dummyMerkleRoot = Buffer.alloc(32, 0xbb); // 32 bytes for a dummy Merkle root
+    priceFeedData.set(dummyMerkleRoot, offset); // merkle_root (32 bytes)
+    offset += 32;
+
+    // Write price_update_data (Vec<u8>, add a dummy 32-byte proof)
+    const dummyProof = Buffer.alloc(32, 0); // 32 bytes of zeros (dummy proof)
+    priceFeedData.writeUInt32LE(dummyProof.length, offset); // Length of Vec<u8>
+    offset += 4;
+    priceFeedData.set(dummyProof, offset); // Write the dummy proof
+    offset += dummyProof.length;
+
+    // Create the price update account on-chain
+    const lamports = await connecton.getMinimumBalanceForRentExemption(
+      priceFeedData.length
+    );
+    const createAccountIx = SystemProgram.createAccount({
+      fromPubkey: admin.publicKey,
+      newAccountPubkey: priceFeed.publicKey,
+      lamports,
+      space: priceFeedData.length,
+      programId: program.programId, // Owned by the program for simplicity
+    });
+
+    const tx = new anchor.web3.Transaction().add(createAccountIx);
+    await provider.sendAndConfirm(tx, [priceFeed]);
+
+    // Call fetch_price
+    const price = await program.methods
+      .fetchPrice()
+      .accounts({
+        priceUpdate: priceFeed.publicKey,
+        clock: anchor.web3.SYSVAR_CLOCK_PUBKEY,
+      })
+      .rpc();
+
+    console.log("Price:", price);
+
+    // Assert the returned price matches the mocked price
+    assert.strictEqual(
+      new anchor.BN(price).toNumber(),
+      PYTH_PRICE,
+      "Fetched price does not match mocked price"
+    );
   });
 });
